@@ -55,7 +55,10 @@ export default function TodayPage() {
         }
 
         setTasksData(
-          habitOrder.reduce((acc, h) => ({ ...acc, [h]: metaData[h]?.tasks || [] }), {})
+          habitOrder.reduce(
+            (acc, h) => ({ ...acc, [h]: metaData[h]?.tasks || [] }),
+            {}
+          )
         );
 
         // Initialize top-level checks
@@ -65,23 +68,22 @@ export default function TodayPage() {
         });
         setChecks(initialChecks);
 
-        // Initialize tasksChecked from localStorage or top-level
-        // Initialize tasksChecked from localStorage or default to false (or top-level check if no tasks)
-const storedTasks = JSON.parse(localStorage.getItem(today)) || {};
-const initialTasksChecked = {};
-habitOrder.forEach((h) => {
-  const tasks = metaData[h]?.tasks || [];
-  if (tasks.length === 0) {
-    // No subtasks, just use top-level check
-    initialTasksChecked[h] = [];
-  } else {
-    initialTasksChecked[h] = tasks.map((_, idx) =>
-      storedTasks[h]?.[idx] !== undefined ? storedTasks[h][idx] : false
-    );
-  }
-});
-setTasksChecked(initialTasksChecked);
-
+        // Initialize tasksChecked from localStorage or default to top-level check
+        const storedTasks = JSON.parse(localStorage.getItem(today)) || {};
+        const initialTasksChecked = {};
+        habitOrder.forEach((h) => {
+          const tasks = metaData[h]?.tasks || [];
+          if (tasks.length === 0) {
+            initialTasksChecked[h] = [];
+          } else {
+            initialTasksChecked[h] = tasks.map((_, idx) =>
+              storedTasks[h]?.[idx] !== undefined
+                ? storedTasks[h][idx]
+                : initialChecks[h]
+            );
+          }
+        });
+        setTasksChecked(initialTasksChecked);
 
         setLoading(false);
       } catch (err) {
@@ -92,40 +94,34 @@ setTasksChecked(initialTasksChecked);
     load();
   }, [user]);
 
-  // Persist task-level state to localStorage
-  useEffect(() => {
-    const saveTasks = {};
-    habitOrder.forEach((h) => {
-      saveTasks[h] = tasksChecked[h] || [];
-    });
-    localStorage.setItem(today, JSON.stringify(saveTasks));
-  }, [tasksChecked]);
-
+  // Update top-level habit
   const updateHabitCheck = async (habitKey, value) => {
-    // Update top-level check
     setChecks((prev) => ({ ...prev, [habitKey]: value }));
-    // Update all subtasks
-    setTasksChecked((prev) => ({
-      ...prev,
-      [habitKey]: prev[habitKey].map(() => value),
-    }));
+    setTasksChecked((prev) => {
+      const newTasks = prev[habitKey].map(() => value);
+      const stored = JSON.parse(localStorage.getItem(today)) || {};
+      stored[habitKey] = newTasks;
+      localStorage.setItem(today, JSON.stringify(stored));
+      return { ...prev, [habitKey]: newTasks };
+    });
 
     if (!user) return;
     const ref = doc(db, `users/${user.uid}/days/${today}`);
     await setDoc(ref, { [habitKey]: value }, { merge: true });
   };
 
+  // Update individual task
   const updateTaskCheck = (habitKey, idx, value) => {
     setTasksChecked((prev) => {
       const newArr = [...prev[habitKey]];
       newArr[idx] = value;
 
-      // Persist immediately
-      const storedTasks = JSON.parse(localStorage.getItem(today)) || {};
-      storedTasks[habitKey] = newArr;
-      localStorage.setItem(today, JSON.stringify(storedTasks));
+      // Update localStorage immediately
+      const stored = JSON.parse(localStorage.getItem(today)) || {};
+      stored[habitKey] = newArr;
+      localStorage.setItem(today, JSON.stringify(stored));
 
-      // Update top-level check based on all tasks
+      // Update top-level check if all tasks are checked
       setChecks((prevChecks) => ({
         ...prevChecks,
         [habitKey]: newArr.every(Boolean),
