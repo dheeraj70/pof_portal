@@ -16,8 +16,8 @@ export default function TodayPage() {
 
   const [user, setUser] = useState(null);
   const [checks, setChecks] = useState(defaultChecks);
-  const [tasksData, setTasksData] = useState({}); // { habit: [tasks] }
-  const [tasksChecked, setTasksChecked] = useState({}); // { habit: [bool] }
+  const [tasksData, setTasksData] = useState({});
+  const [tasksChecked, setTasksChecked] = useState({});
   const [expanded, setExpanded] = useState({});
   const [loading, setLoading] = useState(true);
 
@@ -112,9 +112,10 @@ export default function TodayPage() {
       return { ...prev, [habitKey]: newArr };
     });
 
-    const allChecked =
-      tasksChecked[habitKey].every((v, i) => (i === idx ? value : v)) &&
-      value;
+    const allChecked = tasksData[habitKey].length
+      ? tasksChecked[habitKey].every((v, i) => (i === idx ? value : v))
+      : value;
+
     setChecks((prev) => ({ ...prev, [habitKey]: allChecked }));
 
     if (!user) return;
@@ -124,9 +125,10 @@ export default function TodayPage() {
 
   const getColor = (habitKey) => {
     const tasks = tasksChecked[habitKey] || [];
-    if (!tasks.length) return "bg-gray-100";
+    const total = tasks.length;
     const done = tasks.filter(Boolean).length;
-    const percent = (done / tasks.length) * 100;
+    const percent = total === 0 ? (checks[habitKey] ? 100 : 0) : (done / total) * 100;
+
     if (percent === 100) return "bg-green-600 text-white";
     if (percent >= 60) return "bg-green-400 text-white";
     if (percent >= 30) return "bg-yellow-300 text-black";
@@ -150,11 +152,11 @@ export default function TodayPage() {
         {habitOrder.map((habitKey) => (
           <div
             key={habitKey}
-            className={`rounded-xl overflow-hidden shadow-sm border`}
+            className="rounded-xl overflow-hidden shadow-sm border"
           >
             {/* Habit header */}
             <div
-              className={`w-full flex justify-between items-center p-4 cursor-pointer transition-colors duration-200 ${getColor(
+              className={`w-full flex justify-between items-center p-4 cursor-pointer transition-colors duration-300 ${getColor(
                 habitKey
               )}`}
               onClick={() =>
@@ -187,22 +189,26 @@ export default function TodayPage() {
                   <p className="text-gray-400 text-sm">No tasks for today.</p>
                 )}
                 {tasksData[habitKey]?.map((task, idx) => (
-  <div
-    key={idx}
-    className="flex justify-between items-center bg-white rounded-lg shadow-sm px-3 py-2 cursor-pointer hover:bg-gray-100 transition-colors"
-    onClick={() =>
-      updateTaskCheck(habitKey, idx, !(tasksChecked[habitKey]?.[idx] || false))
-    }
-  >
-    <span>{task}</span>
-    <input
-      type="checkbox"
-      checked={tasksChecked[habitKey]?.[idx] || false}
-      readOnly
-      className="w-5 h-5"
-    />
-  </div>
-))}
+                  <div
+                    key={idx}
+                    className="flex justify-between items-center bg-white rounded-lg shadow-sm px-3 py-2 cursor-pointer hover:bg-gray-100 transition-colors"
+                    onClick={() =>
+                      updateTaskCheck(
+                        habitKey,
+                        idx,
+                        !(tasksChecked[habitKey]?.[idx] || false)
+                      )
+                    }
+                  >
+                    <span>{task}</span>
+                    <input
+                      type="checkbox"
+                      checked={tasksChecked[habitKey]?.[idx] || false}
+                      readOnly
+                      className="w-5 h-5"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           </div>
