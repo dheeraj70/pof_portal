@@ -65,7 +65,7 @@ export default function TodayPage() {
         });
         setChecks(initialChecks);
 
-        // Initialize tasksChecked from localStorage
+        // Initialize tasksChecked from localStorage or top-level
         const storedTasks = JSON.parse(localStorage.getItem(today)) || {};
         const initialTasksChecked = {};
         habitOrder.forEach((h) => {
@@ -95,32 +95,37 @@ export default function TodayPage() {
   }, [tasksChecked]);
 
   const updateHabitCheck = async (habitKey, value) => {
+    // Update top-level check
     setChecks((prev) => ({ ...prev, [habitKey]: value }));
+    // Update all subtasks
     setTasksChecked((prev) => ({
       ...prev,
       [habitKey]: prev[habitKey].map(() => value),
     }));
+
     if (!user) return;
     const ref = doc(db, `users/${user.uid}/days/${today}`);
     await setDoc(ref, { [habitKey]: value }, { merge: true });
   };
 
-  const updateTaskCheck = async (habitKey, idx, value) => {
+  const updateTaskCheck = (habitKey, idx, value) => {
     setTasksChecked((prev) => {
       const newArr = [...prev[habitKey]];
       newArr[idx] = value;
+
+      // Persist immediately
+      const storedTasks = JSON.parse(localStorage.getItem(today)) || {};
+      storedTasks[habitKey] = newArr;
+      localStorage.setItem(today, JSON.stringify(storedTasks));
+
+      // Update top-level check based on all tasks
+      setChecks((prevChecks) => ({
+        ...prevChecks,
+        [habitKey]: newArr.every(Boolean),
+      }));
+
       return { ...prev, [habitKey]: newArr };
     });
-
-    const allChecked = tasksData[habitKey].length
-      ? tasksChecked[habitKey].every((v, i) => (i === idx ? value : v))
-      : value;
-
-    setChecks((prev) => ({ ...prev, [habitKey]: allChecked }));
-
-    if (!user) return;
-    const ref = doc(db, `users/${user.uid}/days/${today}`);
-    await setDoc(ref, { [habitKey]: allChecked }, { merge: true });
   };
 
   const getColor = (habitKey) => {
@@ -150,10 +155,7 @@ export default function TodayPage() {
         <h1 className="text-2xl font-bold mb-4">Today</h1>
 
         {habitOrder.map((habitKey) => (
-          <div
-            key={habitKey}
-            className="rounded-xl overflow-hidden shadow-sm border"
-          >
+          <div key={habitKey} className="rounded-xl overflow-hidden shadow-sm border">
             {/* Habit header */}
             <div
               className={`w-full flex justify-between items-center p-4 cursor-pointer transition-colors duration-300 ${getColor(
