@@ -66,15 +66,22 @@ export default function TodayPage() {
         setChecks(initialChecks);
 
         // Initialize tasksChecked from localStorage or top-level
-        const storedTasks = JSON.parse(localStorage.getItem(today)) || {};
-        const initialTasksChecked = {};
-        habitOrder.forEach((h) => {
-          const tasks = metaData[h]?.tasks || [];
-          initialTasksChecked[h] = tasks.map((_, idx) =>
-            storedTasks[h]?.[idx] ?? initialChecks[h]
-          );
-        });
-        setTasksChecked(initialTasksChecked);
+        // Initialize tasksChecked from localStorage or default to false (or top-level check if no tasks)
+const storedTasks = JSON.parse(localStorage.getItem(today)) || {};
+const initialTasksChecked = {};
+habitOrder.forEach((h) => {
+  const tasks = metaData[h]?.tasks || [];
+  if (tasks.length === 0) {
+    // No subtasks, just use top-level check
+    initialTasksChecked[h] = [];
+  } else {
+    initialTasksChecked[h] = tasks.map((_, idx) =>
+      storedTasks[h]?.[idx] !== undefined ? storedTasks[h][idx] : false
+    );
+  }
+});
+setTasksChecked(initialTasksChecked);
+
 
         setLoading(false);
       } catch (err) {
