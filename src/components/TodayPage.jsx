@@ -18,7 +18,7 @@ export default function TodayPage() {
   const [checks, setChecks] = useState(defaultState);
   const [loading, setLoading] = useState(true);
 
-  const today = new Date("2025-11-03").toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
 
   // Listen for login state
   useEffect(() => {
