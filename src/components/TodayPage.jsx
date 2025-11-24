@@ -55,7 +55,10 @@ export default function TodayPage() {
         }
 
         setTasksData(
-          habitOrder.reduce((acc, h) => ({ ...acc, [h]: metaData[h]?.tasks || [] }), {})
+          habitOrder.reduce(
+            (acc, h) => ({ ...acc, [h]: metaData[h]?.tasks || [] }),
+            {}
+          )
         );
 
         // Initialize top-level checks
@@ -65,14 +68,20 @@ export default function TodayPage() {
         });
         setChecks(initialChecks);
 
-        // Initialize tasksChecked from localStorage
+        // Initialize tasksChecked from localStorage or default to top-level check
         const storedTasks = JSON.parse(localStorage.getItem(today)) || {};
         const initialTasksChecked = {};
         habitOrder.forEach((h) => {
           const tasks = metaData[h]?.tasks || [];
-          initialTasksChecked[h] = tasks.map((_, idx) =>
-            storedTasks[h]?.[idx] ?? initialChecks[h]
-          );
+          if (tasks.length === 0) {
+            initialTasksChecked[h] = [];
+          } else {
+            initialTasksChecked[h] = tasks.map((_, idx) =>
+              storedTasks[h]?.[idx] !== undefined
+                ? storedTasks[h][idx]
+                : initialChecks[h]
+            );
+          }
         });
         setTasksChecked(initialTasksChecked);
 
@@ -85,42 +94,41 @@ export default function TodayPage() {
     load();
   }, [user]);
 
-  // Persist task-level state to localStorage
-  useEffect(() => {
-    const saveTasks = {};
-    habitOrder.forEach((h) => {
-      saveTasks[h] = tasksChecked[h] || [];
-    });
-    localStorage.setItem(today, JSON.stringify(saveTasks));
-  }, [tasksChecked]);
-
+  // Update top-level habit
   const updateHabitCheck = async (habitKey, value) => {
     setChecks((prev) => ({ ...prev, [habitKey]: value }));
-    setTasksChecked((prev) => ({
-      ...prev,
-      [habitKey]: prev[habitKey].map(() => value),
-    }));
+    setTasksChecked((prev) => {
+      const newTasks = prev[habitKey].map(() => value);
+      const stored = JSON.parse(localStorage.getItem(today)) || {};
+      stored[habitKey] = newTasks;
+      localStorage.setItem(today, JSON.stringify(stored));
+      return { ...prev, [habitKey]: newTasks };
+    });
+
     if (!user) return;
     const ref = doc(db, `users/${user.uid}/days/${today}`);
     await setDoc(ref, { [habitKey]: value }, { merge: true });
   };
 
-  const updateTaskCheck = async (habitKey, idx, value) => {
+  // Update individual task
+  const updateTaskCheck = (habitKey, idx, value) => {
     setTasksChecked((prev) => {
       const newArr = [...prev[habitKey]];
       newArr[idx] = value;
+
+      // Update localStorage immediately
+      const stored = JSON.parse(localStorage.getItem(today)) || {};
+      stored[habitKey] = newArr;
+      localStorage.setItem(today, JSON.stringify(stored));
+
+      // Update top-level check if all tasks are checked
+      setChecks((prevChecks) => ({
+        ...prevChecks,
+        [habitKey]: newArr.every(Boolean),
+      }));
+
       return { ...prev, [habitKey]: newArr };
     });
-
-    const allChecked = tasksData[habitKey].length
-      ? tasksChecked[habitKey].every((v, i) => (i === idx ? value : v))
-      : value;
-
-    setChecks((prev) => ({ ...prev, [habitKey]: allChecked }));
-
-    if (!user) return;
-    const ref = doc(db, `users/${user.uid}/days/${today}`);
-    await setDoc(ref, { [habitKey]: allChecked }, { merge: true });
   };
 
   const getColor = (habitKey) => {
@@ -150,10 +158,7 @@ export default function TodayPage() {
         <h1 className="text-2xl font-bold mb-4">Today</h1>
 
         {habitOrder.map((habitKey) => (
-          <div
-            key={habitKey}
-            className="rounded-xl overflow-hidden shadow-sm border"
-          >
+          <div key={habitKey} className="rounded-xl overflow-hidden shadow-sm border">
             {/* Habit header */}
             <div
               className={`w-full flex justify-between items-center p-4 cursor-pointer transition-colors duration-300 ${getColor(
