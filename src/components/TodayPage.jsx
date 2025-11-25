@@ -35,12 +35,12 @@ export default function TodayPage() {
 
     const load = async () => {
       try {
-        // Load top-level checks
+        // Load top-level checks (day document under users/{uid}/days/{today})
         const dayRef = doc(db, `users/${user.uid}/days/${today}`);
         const daySnap = await getDoc(dayRef);
         const dayData = daySnap.exists() ? daySnap.data() : {};
 
-        // Load habit metadata
+        // Load habit metadata (stored on users/{uid} doc as habitMetadata)
         const metaRef = doc(db, `users/${user.uid}`);
         const metaSnap = await getDoc(metaRef);
 
@@ -48,12 +48,14 @@ export default function TodayPage() {
         if (metaSnap.exists()) {
           metaData = metaSnap.data()?.habitMetadata || {};
         } else {
+          // initialize if missing
           habitOrder.forEach((h) => {
             metaData[h] = { tasks: [], principles: [], challenges: [] };
           });
           await setDoc(metaRef, { habitMetadata: metaData });
         }
 
+        // set tasksData from metadata
         setTasksData(
           habitOrder.reduce(
             (acc, h) => ({ ...acc, [h]: metaData[h]?.tasks || [] }),
@@ -61,14 +63,14 @@ export default function TodayPage() {
           )
         );
 
-        // Initialize top-level checks
+        // Initialize top-level checks from dayData
         const initialChecks = {};
         habitOrder.forEach((h) => {
           initialChecks[h] = !!dayData[h];
         });
         setChecks(initialChecks);
 
-        // Initialize tasksChecked from localStorage or default to top-level check
+        // Initialize tasksChecked from localStorage OR fallback to top-level check
         const storedTasks = JSON.parse(localStorage.getItem(today)) || {};
         const initialTasksChecked = {};
         habitOrder.forEach((h) => {
@@ -77,9 +79,10 @@ export default function TodayPage() {
             initialTasksChecked[h] = [];
           } else {
             initialTasksChecked[h] = tasks.map((_, idx) =>
-              storedTasks[h]?.[idx] !== undefined
+              // preserve false if present in storedTasks
+              storedTasks[h] && storedTasks[h][idx] !== undefined
                 ? storedTasks[h][idx]
-                : initialChecks[h]
+                : initialChecks[h] // if no saved value, default to top-level check
             );
           }
         });
@@ -87,45 +90,78 @@ export default function TodayPage() {
 
         setLoading(false);
       } catch (err) {
-        console.error(err);
+        console.error("TodayPage load error:", err);
       }
     };
 
     load();
   }, [user]);
 
-  // Update top-level habit
-  const updateHabitCheck = async (habitKey, value) => {
-    setChecks((prev) => ({ ...prev, [habitKey]: value }));
-    setTasksChecked((prev) => {
-      const newTasks = prev[habitKey].map(() => value);
-      const stored = JSON.parse(localStorage.getItem(today)) || {};
-      stored[habitKey] = newTasks;
-      localStorage.setItem(today, JSON.stringify(stored));
-      return { ...prev, [habitKey]: newTasks };
-    });
-
-    if (!user) return;
-    const ref = doc(db, `users/${user.uid}/days/${today}`);
-    await setDoc(ref, { [habitKey]: value }, { merge: true });
+  // Helper: write tasks object to localStorage (atomic)
+  const persistTasksToLocal = (tasksObj) => {
+    try {
+      localStorage.setItem(today, JSON.stringify(tasksObj));
+    } catch (e) {
+      console.warn("Failed to save tasks to localStorage", e);
+    }
   };
 
-  // Update individual task
-  const updateTaskCheck = (habitKey, idx, value) => {
-    setTasksChecked((prev) => {
-      const newArr = [...prev[habitKey]];
-      newArr[idx] = value;
+  // Update top-level habit (checkbox on header) — toggles all subtasks and writes Firestore + localStorage
+  const updateHabitCheck = async (habitKey, value) => {
+    // update checks locally
+    setChecks((prev) => ({ ...prev, [habitKey]: value }));
 
-      // Update localStorage immediately
+    // update tasksChecked locally and persist
+    setTasksChecked((prev) => {
+      // ensure array exists
+      const prevArr = prev[habitKey] || [];
+      const newArr = prevArr.map(() => value);
+      const updated = { ...prev, [habitKey]: newArr };
+
+      // persist to localStorage
       const stored = JSON.parse(localStorage.getItem(today)) || {};
       stored[habitKey] = newArr;
-      localStorage.setItem(today, JSON.stringify(stored));
+      persistTasksToLocal(stored);
 
-      // Update top-level check if all tasks are checked
-      setChecks((prevChecks) => ({
-        ...prevChecks,
-        [habitKey]: newArr.every(Boolean),
-      }));
+      return updated;
+    });
+
+    // write to Firestore
+    if (!user) return;
+    try {
+      const ref = doc(db, `users/${user.uid}/days/${today}`);
+      await setDoc(ref, { [habitKey]: value }, { merge: true });
+    } catch (e) {
+      console.error("Failed writing habit to Firestore:", e);
+    }
+  };
+
+  // Update a single task checkbox: update state, persist localStorage, compute top-level and write Firestore for top-level
+  const updateTaskCheck = (habitKey, idx, value) => {
+    // Use functional update so we always use latest prev state
+    setTasksChecked((prev) => {
+      const prevArr = prev[habitKey] || [];
+      const newArr = [...prevArr];
+      newArr[idx] = value;
+
+      // persist immediately
+      const stored = JSON.parse(localStorage.getItem(today)) || {};
+      stored[habitKey] = newArr;
+      persistTasksToLocal(stored);
+
+      // compute new top-level value
+      const allChecked = newArr.length > 0 ? newArr.every(Boolean) : value;
+
+      // update checks state
+      setChecks((prevChecks) => ({ ...prevChecks, [habitKey]: allChecked }));
+
+      // write top-level change to Firestore (fire-and-forget)
+      if (user) {
+        const ref = doc(db, `users/${user.uid}/days/${today}`);
+        setDoc(ref, { [habitKey]: allChecked }, { merge: true }).catch((e) =>
+          console.error("Failed writing task-derived top-level to Firestore:", e)
+        );
+      }
 
       return { ...prev, [habitKey]: newArr };
     });
@@ -185,7 +221,7 @@ export default function TodayPage() {
             <div
               style={{
                 maxHeight: expanded[habitKey] ? "999px" : "0",
-                transition: "max-height 0.3s ease",
+                transition: "max-height 0.28s ease",
                 overflow: "hidden",
               }}
             >
@@ -198,11 +234,7 @@ export default function TodayPage() {
                     key={idx}
                     className="flex justify-between items-center bg-white rounded-lg shadow-sm px-3 py-2 cursor-pointer hover:bg-gray-100 transition-colors"
                     onClick={() =>
-                      updateTaskCheck(
-                        habitKey,
-                        idx,
-                        !(tasksChecked[habitKey]?.[idx] || false)
-                      )
+                      updateTaskCheck(habitKey, idx, !(tasksChecked[habitKey]?.[idx] || false))
                     }
                   >
                     <span>{task}</span>
